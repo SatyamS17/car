@@ -2,15 +2,18 @@ import math
 from time import sleep
 
 import numpy as np
-from servo import Servo
+
+# from servo import Servo
 from ultrasonic import Ultrasonic
+import matplotlib.pyplot as plt
+import time
 
 class AdvancedMap:
     def __init__(
-        self, map_dim: int = 500, cell_size: float = 1.0, ultrasonic_range: float = 50.0
+        self, map_dim: int = 100, cell_size: float = 1.0, ultrasonic_range: float = 50.0
     ) -> None:
         self.ultrasonic = Ultrasonic()
-        self.servo = Servo()
+        # self.servo = Servo()
 
         self.map_dim = map_dim
         self.cell_size = cell_size
@@ -53,15 +56,15 @@ class AdvancedMap:
         scan_data = []
 
         for angle in range(start_angle, end_angle + 1, step):
-            self.servo.set_servo_pwm("0", angle)
-            sleep(0.2)
+            # self.servo.set_servo_pwm("0", angle)
+            sleep(0.1)
 
             distance = self.ultrasonic.get_distance()
 
             if (distance > 0) and (distance < self.ultrasonic_range):
                 scan_data.append((angle, distance))
 
-        self.servo.set_servo_pwm("0", 90)
+        # self.servo.set_servo_pwm("0", 90)
         return scan_data
 
     def interpolate_line(self, r1: int, c1: int, r2: int, c2: int):
@@ -111,7 +114,9 @@ class AdvancedMap:
 
             self.interpolate_line(r1, c1, r2, c2)
 
-    def update_car_position(self, velocity: float, angular_velocity: float, dt: float = 0.1):
+    def update_car_position(
+        self, velocity: float, angular_velocity: float, dt: float = 0.1
+    ):
         self.car_angle = (self.car_angle + angular_velocity * dt) % 360
 
         distance = velocity * dt
@@ -125,15 +130,36 @@ class AdvancedMap:
 
         self.car_row = max(0, min(self.map_dim - 1, self.car_row))
         self.car_col = max(0, min(self.map_dim - 1, self.car_col))
-    
+
     def update_map(self):
         data = self.scan_environment()
         self.update_map_with_scan(scan_data=data)
-    
+
     def in_bounds(self, pos):
         r, c = pos
-        return 0 <= r < self.environment_map.shape[0] and 0 <= c < self.environment_map.shape[1]
+        return (
+            0 <= r < self.environment_map.shape[0]
+            and 0 <= c < self.environment_map.shape[1]
+        )
 
     def is_free(self, pos):
         r, c = pos
         return self.in_bounds(pos) and self.environment_map[r, c] == 0
+        
+    def visualize(self, refresh=0.2):
+        plt.ion()  # interactive mode ON
+        fig, ax = plt.subplots()
+        img = ax.imshow(self.environment_map, cmap='binary', origin='lower', interpolation='nearest')
+        ax.set_title("Environment Map")
+        ax.set_xlabel("X (col)")
+        ax.set_ylabel("Y (row)")
+        ax.set_aspect("equal")
+
+        while True:
+            # Update the image data
+            img.set_data(self.environment_map)
+
+            # Redraw the canvas
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            time.sleep(refresh)  # control update rate

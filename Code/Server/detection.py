@@ -74,7 +74,7 @@ def run(model: str, width: int, height: int, num_threads: int,
         import mediapipe as mp
         input_tensor = mp.Image(
                 image_format=mp.ImageFormat.SRGB,
-                data=rgb_image
+                data=bgr_image
             )
 
         # Run inference
@@ -113,7 +113,7 @@ def main():
         "--model",
         help="Path of the object detection model.",
         required=False,
-        default="efficientdet_lite0.tflite"
+        default="efficientdet.tflite"
     )
     parser.add_argument(
         "--frameWidth", help="Width of frame.", type=int, default=640
