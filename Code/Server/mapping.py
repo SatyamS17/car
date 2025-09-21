@@ -8,6 +8,7 @@ from ultrasonic import Ultrasonic
 import matplotlib.pyplot as plt
 import time
 
+
 class AdvancedMap:
     def __init__(
         self, map_dim: int = 100, cell_size: float = 1.0, ultrasonic_range: float = 50.0
