@@ -14,9 +14,36 @@ from mapping import AdvancedMap
 import matplotlib.pyplot as plt
 import numpy as np
 import math
+from stop import StopSignDetector
+
+DIRECTION_MAP = {
+    (1, 0): "right",
+    (-1, 0): "left",
+    (0, -1): "down",
+    (0, 1): "up",
+    (1, -1): "down-right",
+    (1, 1): "up-right",
+    (-1, -1): "down-left",
+    (-1, 1): "up-left"
+}
+
+# label ? (row_delta, col_delta)
+LABEL_TO_DELTA = {v: k for k, v in DIRECTION_MAP.items()}
+
+# 8 orientations in clockwise order (45-degree increments)
+FACING_ORDER = [
+    "up",         # (0, 1)
+    "up-right",   # (1, 1)
+    "right",      # (1, 0)
+    "down-right", # (1, -1)
+    "down",       # (0, -1)
+    "down-left",  # (-1, -1)
+    "left",       # (-1, 0)
+    "up-left"     # (-1, 1)
+]
 
 class PathPlanner:
-    def __init__(self, grid: AdvancedMap, replan_steps=5):
+    def __init__(self, grid: AdvancedMap, replan_steps=2):
         self.grid = grid
         self.replan_steps = replan_steps
         self.pos = (10, 10)  # start position of the car (row, col)
@@ -24,6 +51,8 @@ class PathPlanner:
         self.last_path = []  # store last planned *directions* for visualization
         self.path_history = [] # Store all visited positions
         self.car = Ordinary_Car()
+        self.stop_detector = StopSignDetector()
+        self.stop_latched = False
         np.set_printoptions(threshold=np.inf)
 
     @staticmethod
@@ -38,17 +67,6 @@ class PathPlanner:
         """
 
         # neighbor: (dx, dy) where dx = row offset, dy = col offset
-        neighbors = {
-            (-1, 0): "up",
-            (1, 0): "down",
-            (0, -1): "left",
-            (0, 1): "right",
-            (-1, -1): "up-left",
-            (-1, 1): "up-right",
-            (1, -1): "down-left",
-            (1, 1): "down-right"
-        }
-
         def octile_heuristic(a, b):
             # a, b are (row, col)
             dx = abs(a[0] - b[0])
@@ -80,12 +98,12 @@ class PathPlanner:
                 while current in parent:
                     prev = parent[current]
                     move = (current[0] - prev[0], current[1] - prev[1])
-                    directions.append(neighbors[move])
+                    directions.append(DIRECTION_MAP[move])
                     current = prev
                 directions.reverse()
                 return directions
 
-            for (dx, dy), label in neighbors.items():
+            for (dx, dy), label in DIRECTION_MAP.items():
                 neighbor = (current[0] + dx, current[1] + dy)
 
                 if not grid.in_bounds(neighbor):
@@ -128,15 +146,11 @@ class PathPlanner:
             return None
 
         # 8 orientations in clockwise order (45-degree increments)
-        facing_order = [
-            "up", "up-right", "right", "down-right",
-            "down", "down-left", "left", "up-left"
-        ]
 
         def turn_to(facing, desired):
             """Compute minimal rotation from facing to desired."""
-            i = facing_order.index(facing)
-            j = facing_order.index(desired)
+            i = FACING_ORDER.index(facing)
+            j = FACING_ORDER.index(desired)
             steps_right = (j - i) % 8
             steps_left = (i - j) % 8
             if steps_right <= steps_left:
@@ -145,15 +159,16 @@ class PathPlanner:
                 return ("left", steps_left)
 
         # map direction labels to offsets
-        move_to_delta = {
-            "up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1),
-            "up-left": (-1, -1), "up-right": (-1, 1),
-            "down-left": (1, -1), "down-right": (1, 1)
-        }
 
-        time_per_45deg = 1  # seconds per 45-degree turn
+        time_per_45deg = 0.25  # seconds per 45-degree turn
 
         while self.pos != tuple(target):
+            # --- Check stop sign ---
+            if self.stop_detector.get_status() and not self.stop_latched:
+                print("Stop sign detected! Pausing 2 seconds...")
+                self.stop_latched = True
+                time.sleep(2)  # pause once
+
             plan = self.astar(self.grid, self.pos, target)
             self.last_path = plan  # store planned direction labels
 
@@ -162,47 +177,46 @@ class PathPlanner:
                 break
 
             for step_label in plan[:self.replan_steps]:
-                if step_label not in facing_order:
+                if step_label not in FACING_ORDER:
                     desired_facing = "up"
                 else:
                     desired_facing = step_label
 
                 # --- Rotate first ---
                 turn_dir, turn_steps = turn_to(self.facing, desired_facing)
+                if turn_steps > 0:
+                    print(f"Rotating {turn_dir} {turn_steps * 45} degrees to face {desired_facing}")
                 for _ in range(turn_steps):
                     if turn_dir == "right":
-                        self.car.set_motor_model(2000, 2000, -2000, -2000)  # spin right
+                        self.car.set_motor_model(-2000, -2000, 2000, 2000)  # spin right
                     else:
-                        self.car.set_motor_model(-2000, -2000, 2000, 2000)  # spin left
+                        self.car.set_motor_model(2000, 2000, -2000, -2000)  # spin left
                     time.sleep(time_per_45deg)
                     self.car.set_motor_model(0, 0, 0, 0)  # stop
                     # update facing index
                     if turn_dir == "right":
-                        new_index = (facing_order.index(self.facing) + 1) % 8
+                        new_index = (FACING_ORDER.index(self.facing) + 1) % 8
                     else:
-                        new_index = (facing_order.index(self.facing) - 1) % 8
-                    self.facing = facing_order[new_index]
+                        new_index = (FACING_ORDER.index(self.facing) - 1) % 8
+                    self.facing = FACING_ORDER[new_index]
 
                 # --- Move forward ---
                 is_diagonal = "-" in step_label
-                move_time = 0.4 if is_diagonal else 0.3  # longer for diagonals
-                self.car.set_motor_model(-1000, -1000, -1000, -1000)  # forward
+                move_time = 0.3
+                print(f"Moving {step_label}")
+                self.car.set_motor_model(-750, -750, -750, -750)  # forward
                 time.sleep(move_time)
                 self.car.set_motor_model(0, 0, 0, 0)  # stop
 
                 # Update position in grid
-                delta = move_to_delta[step_label]
+                delta = LABEL_TO_DELTA[step_label]
                 new_pos = (self.pos[0] + delta[0], self.pos[1] + delta[1])
-
-                if not self.grid.in_bounds(new_pos) or not self.grid.is_free(new_pos):
-                    print(f"Blocked at {new_pos}, replanning...")
-                    break
 
                 self.pos = new_pos
                 self.path_history.append(self.pos)
                 self.grid.car_row = self.pos[0]
                 self.grid.car_col = self.pos[1]
-                self.grid.car_angle = facing_order.index(self.facing) * 45.0
+                self.grid.car_angle = FACING_ORDER.index(self.facing) * 45.0
 
                 if self.pos == tuple(target):
                     print("Reached target")
@@ -236,17 +250,6 @@ class PathPlanner:
 
         ax.legend()
 
-        move_to_delta = {
-            "up": (-1, 0),
-            "down": (1, 0),
-            "left": (0, -1),
-            "right": (0, 1),
-            "up-left": (-1, -1),
-            "up-right": (-1, 1),
-            "down-left": (1, -1),
-            "down-right": (1, 1)
-        }
-
         while True:
             # === Update environment ===
             env = np.array(self.grid.environment_map)
@@ -270,7 +273,7 @@ class PathPlanner:
                 path_cols, path_rows = [], []
                 r, c = self.pos
                 for step_label in self.last_path:
-                    dr, dc = move_to_delta.get(step_label, (0, 0))
+                    dr, dc = LABEL_TO_DELTA.get(step_label, (0, 0))
                     r += dr
                     c += dc
                     path_rows.append(r)
@@ -286,14 +289,14 @@ class PathPlanner:
 
 # === MAIN ===
 if __name__ == "__main__":
-    grid = AdvancedMap(map_dim=100)
+    grid = AdvancedMap(map_dim=100, cell_size=5)
     planner = PathPlanner(grid)
 
     try:
         # start planning loop in background thread
-        threading.Thread(
+        threading.Thread( 
             target=planner.planLoop,
-            args=((5, 5), (90, 90)),
+            args=((5, 5), (20, 20)),
             daemon=True
         ).start()
 
@@ -304,3 +307,4 @@ if __name__ == "__main__":
         # make sure all motors are stopped if program crashes or exits
         print("Stopping all motors for safety...")
         planner.car.set_motor_model(0, 0, 0, 0)
+

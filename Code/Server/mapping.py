@@ -1,6 +1,8 @@
 import math
+import time
 from time import sleep
 
+<<<<<<< HEAD
 import numpy as np
 
 from servo import Servo
@@ -8,6 +10,14 @@ from ultrasonic import Ultrasonic
 import matplotlib.pyplot as plt
 import time
 from scipy.ndimage import binary_dilation
+=======
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.ndimage import binary_dilation
+from servo import Servo
+from ultrasonic import Ultrasonic
+
+>>>>>>> 49f149becdeec5923538456ae4d69805058efb1f
 
 class AdvancedMap:
     def __init__(
@@ -92,6 +102,16 @@ class AdvancedMap:
                 err += dr
                 c += sc
 
+    def inflate_obstacles(self, inflation_radius: int = 2):
+        if inflation_radius <= 0:
+            return
+
+        structure = np.ones((2 * inflation_radius + 1, 2 * inflation_radius + 1))
+
+        self.environment_map = binary_dilation(
+            self.environment_map, structure=structure
+        ).astype(np.uint8)
+
     # combines the above functions to map the sensor readings to the map
     def update_map_with_scan(self, scan_data):
         if not scan_data:
@@ -157,11 +177,13 @@ class AdvancedMap:
     def is_free(self, pos):
         r, c = pos
         return self.in_bounds(pos) and self.environment_map[r, c] == 0
-        
+
     def visualize(self, refresh=0.2):
         plt.ion()  # interactive mode ON
         fig, ax = plt.subplots()
-        img = ax.imshow(self.environment_map, cmap='binary', origin='lower', interpolation='nearest')
+        img = ax.imshow(
+            self.environment_map, cmap="binary", origin="lower", interpolation="nearest"
+        )
         ax.set_title("Environment Map")
         ax.set_xlabel("X (col)")
         ax.set_ylabel("Y (row)")
