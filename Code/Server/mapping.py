@@ -1,12 +1,12 @@
 import math
+import time
 from time import sleep
 
-import numpy as np
-
-# from servo import Servo
-from ultrasonic import Ultrasonic
 import matplotlib.pyplot as plt
-import time
+import numpy as np
+from scipy.ndimage import binary_dilation
+from servo import Servo
+from ultrasonic import Ultrasonic
 
 
 class AdvancedMap:
@@ -14,7 +14,7 @@ class AdvancedMap:
         self, map_dim: int = 100, cell_size: float = 1.0, ultrasonic_range: float = 50.0
     ) -> None:
         self.ultrasonic = Ultrasonic()
-        # self.servo = Servo()
+        self.servo = Servo()
 
         self.map_dim = map_dim
         self.cell_size = cell_size
@@ -57,7 +57,7 @@ class AdvancedMap:
         scan_data = []
 
         for angle in range(start_angle, end_angle + 1, step):
-            # self.servo.set_servo_pwm("0", angle)
+            self.servo.set_servo_pwm("0", angle)
             sleep(0.1)
 
             distance = self.ultrasonic.get_distance()
@@ -91,6 +91,16 @@ class AdvancedMap:
             if e2 < dr:
                 err += dr
                 c += sc
+
+    def inflate_obstacles(self, inflation_radius: int = 2):
+        if inflation_radius <= 0:
+            return
+
+        structure = np.ones((2 * inflation_radius + 1, 2 * inflation_radius + 1))
+
+        self.environment_map = binary_dilation(
+            self.environment_map, structure=structure
+        ).astype(np.uint8)
 
     # combines the above functions to map the sensor readings to the map
     def update_map_with_scan(self, scan_data):
@@ -135,6 +145,7 @@ class AdvancedMap:
     def update_map(self):
         data = self.scan_environment()
         self.update_map_with_scan(scan_data=data)
+        self.inflate_obstacles(inflation_radius=2)
 
     def in_bounds(self, pos):
         r, c = pos
@@ -146,11 +157,13 @@ class AdvancedMap:
     def is_free(self, pos):
         r, c = pos
         return self.in_bounds(pos) and self.environment_map[r, c] == 0
-        
+
     def visualize(self, refresh=0.2):
         plt.ion()  # interactive mode ON
         fig, ax = plt.subplots()
-        img = ax.imshow(self.environment_map, cmap='binary', origin='lower', interpolation='nearest')
+        img = ax.imshow(
+            self.environment_map, cmap="binary", origin="lower", interpolation="nearest"
+        )
         ax.set_title("Environment Map")
         ax.set_xlabel("X (col)")
         ax.set_ylabel("Y (row)")
