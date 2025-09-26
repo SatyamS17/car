@@ -23,6 +23,7 @@ class PathPlanner:
         self.facing = "up"  # starting facing direction
         self.last_path = []  # store last planned *directions* for visualization
         self.path_history = [] # Store all visited positions
+        self.car = Ordinary_Car()
         np.set_printoptions(threshold=np.inf)
 
     @staticmethod
@@ -128,21 +129,12 @@ class PathPlanner:
 
         # 8 orientations in clockwise order (45-degree increments)
         facing_order = [
-            "up",        # 0
-            "up-right",  # 1
-            "right",     # 2
-            "down-right",# 3
-            "down",      # 4
-            "down-left", # 5
-            "left",      # 6
-            "up-left"    # 7
+            "up", "up-right", "right", "down-right",
+            "down", "down-left", "left", "up-left"
         ]
 
         def turn_to(facing, desired):
-            """
-            Compute minimal rotation from facing to desired.
-            Returns tuple (direction, steps) where direction is "right" or "left" and steps is number of 45-degree steps.
-            """
+            """Compute minimal rotation from facing to desired."""
             i = facing_order.index(facing)
             j = facing_order.index(desired)
             steps_right = (j - i) % 8
@@ -152,85 +144,75 @@ class PathPlanner:
             else:
                 return ("left", steps_left)
 
-        # map direction labels to offsets (row delta, col delta)
+        # map direction labels to offsets
         move_to_delta = {
-            "up": (-1, 0),
-            "down": (1, 0),
-            "left": (0, -1),
-            "right": (0, 1),
-            "up-left": (-1, -1),
-            "up-right": (-1, 1),
-            "down-left": (1, -1),
-            "down-right": (1, 1)
+            "up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1),
+            "up-left": (-1, -1), "up-right": (-1, 1),
+            "down-left": (1, -1), "down-right": (1, 1)
         }
 
-        # keep planning until we reach the target
+        time_per_45deg = 1  # seconds per 45-degree turn
+
         while self.pos != tuple(target):
             plan = self.astar(self.grid, self.pos, target)
-            self.last_path = plan  # store planned direction labels for visualization
+            self.last_path = plan  # store planned direction labels
 
             if not plan:
                 print("No path found")
                 break
 
-            # iterate through plan for replan_steps steps
             for step_label in plan[:self.replan_steps]:
-                # turn toward step_label
-                # Note: step_label is also one of the facing_order values (same names), so we can reuse
                 if step_label not in facing_order:
-                    # Shouldn't happen, but safety
                     desired_facing = "up"
                 else:
                     desired_facing = step_label
 
+                # --- Rotate first ---
                 turn_dir, turn_steps = turn_to(self.facing, desired_facing)
+                for _ in range(turn_steps):
+                    if turn_dir == "right":
+                        self.car.set_motor_model(2000, 2000, -2000, -2000)  # spin right
+                    else:
+                        self.car.set_motor_model(-2000, -2000, 2000, 2000)  # spin left
+                    time.sleep(time_per_45deg)
+                    self.car.set_motor_model(0, 0, 0, 0)  # stop
+                    # update facing index
+                    if turn_dir == "right":
+                        new_index = (facing_order.index(self.facing) + 1) % 8
+                    else:
+                        new_index = (facing_order.index(self.facing) - 1) % 8
+                    self.facing = facing_order[new_index]
 
-                # perform turns (simulate time and update facing)
-                if turn_steps > 0:
-                    # choose per-45-degree rotation time (example)
-                    time_per_45deg = 0.25  # seconds per 45-degree turn (tune as needed)
-                    print(f"Turning {turn_dir} {turn_steps} x 45°")
-                    # simulate turning by updating facing step-by-step
-                    for _ in range(turn_steps):
-                        if turn_dir == "right":
-                            new_index = (facing_order.index(self.facing) + 1) % 8
-                        else:
-                            new_index = (facing_order.index(self.facing) - 1) % 8
-                        self.facing = facing_order[new_index]
-                        time.sleep(time_per_45deg)
-                else:
-                    # already facing the correct direction
-                    pass
+                # --- Move forward ---
+                is_diagonal = "-" in step_label
+                move_time = 0.4 if is_diagonal else 0.3  # longer for diagonals
+                self.car.set_motor_model(-1000, -1000, -1000, -1000)  # forward
+                time.sleep(move_time)
+                self.car.set_motor_model(0, 0, 0, 0)  # stop
 
-                # move forward one cell (could be diagonal)
-                print(f"Moving {step_label}")
-                time.sleep(0.2)  # movement duration (tune as needed)
-
+                # Update position in grid
                 delta = move_to_delta[step_label]
                 new_pos = (self.pos[0] + delta[0], self.pos[1] + delta[1])
 
-                # safety check before moving
                 if not self.grid.in_bounds(new_pos) or not self.grid.is_free(new_pos):
-                    print(f"Blocked at intended move {new_pos}; will replan.")
+                    print(f"Blocked at {new_pos}, replanning...")
                     break
 
-                # Update position and history
                 self.pos = new_pos
                 self.path_history.append(self.pos)
                 self.grid.car_row = self.pos[0]
                 self.grid.car_col = self.pos[1]
-                self.grid.car_angle = facing_order.index(self.facing) * 90.0
+                self.grid.car_angle = facing_order.index(self.facing) * 45.0
 
-                # If reached target
                 if self.pos == tuple(target):
                     print("Reached target")
                     self.last_path = []
                     return True
 
-            # allow the grid to update (dynamic environment)
-            self.grid.update_map()
+            self.grid.update_map()  # update dynamic map
 
         return False
+
 
 
     def visualize_live(self):
@@ -307,12 +289,18 @@ if __name__ == "__main__":
     grid = AdvancedMap(map_dim=100)
     planner = PathPlanner(grid)
 
-    # start planning loop in background thread
-    threading.Thread(
-        target=planner.planLoop,
-        args=((5, 5), (90, 90)),
-        daemon=True
-    ).start()
+    try:
+        # start planning loop in background thread
+        threading.Thread(
+            target=planner.planLoop,
+            args=((5, 5), (90, 90)),
+            daemon=True
+        ).start()
 
-    # run visualization in main thread
-    planner.visualize_live()
+        # run visualization in main thread
+        planner.visualize_live()
+
+    finally:
+        # make sure all motors are stopped if program crashes or exits
+        print("Stopping all motors for safety...")
+        planner.car.set_motor_model(0, 0, 0, 0)

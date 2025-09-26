@@ -3,18 +3,18 @@ from time import sleep
 
 import numpy as np
 
-# from servo import Servo
+from servo import Servo
 from ultrasonic import Ultrasonic
 import matplotlib.pyplot as plt
 import time
-
+from scipy.ndimage import binary_dilation
 
 class AdvancedMap:
     def __init__(
         self, map_dim: int = 100, cell_size: float = 1.0, ultrasonic_range: float = 50.0
     ) -> None:
         self.ultrasonic = Ultrasonic()
-        # self.servo = Servo()
+        self.servo = Servo()
 
         self.map_dim = map_dim
         self.cell_size = cell_size
@@ -57,7 +57,7 @@ class AdvancedMap:
         scan_data = []
 
         for angle in range(start_angle, end_angle + 1, step):
-            # self.servo.set_servo_pwm("0", angle)
+            self.servo.set_servo_pwm("0", angle)
             sleep(0.1)
 
             distance = self.ultrasonic.get_distance()
@@ -65,7 +65,7 @@ class AdvancedMap:
             if (distance > 0) and (distance < self.ultrasonic_range):
                 scan_data.append((angle, distance))
 
-        # self.servo.set_servo_pwm("0", 90)
+        self.servo.set_servo_pwm("0", 90)
         return scan_data
 
     def interpolate_line(self, r1: int, c1: int, r2: int, c2: int):
@@ -131,10 +131,21 @@ class AdvancedMap:
 
         self.car_row = max(0, min(self.map_dim - 1, self.car_row))
         self.car_col = max(0, min(self.map_dim - 1, self.car_col))
+    
+    def inflate_obstacles(self, inflation_radius: int = 2):
+        if inflation_radius <= 0:
+            return
 
+        structure = np.ones((2 * inflation_radius + 1, 2 * inflation_radius + 1))
+
+        self.environment_map = binary_dilation(
+            self.environment_map, structure=structure
+        ).astype(np.uint8)
+        
     def update_map(self):
         data = self.scan_environment()
         self.update_map_with_scan(scan_data=data)
+        self.inflate_obstacles(inflation_radius=2)
 
     def in_bounds(self, pos):
         r, c = pos
