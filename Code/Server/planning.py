@@ -14,7 +14,7 @@ from mapping import AdvancedMap
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-from stop import StopSignDetector
+from stop import StopSign
 
 DIRECTION_MAP = {
     (1, 0): "right",
@@ -51,7 +51,7 @@ class PathPlanner:
         self.last_path = []  # store last planned *directions* for visualization
         self.path_history = [] # Store all visited positions
         self.car = Ordinary_Car()
-        self.stop_detector = StopSignDetector()
+        self.stop_detector = StopSign()
         self.stop_latched = False
         np.set_printoptions(threshold=np.inf)
 
@@ -163,8 +163,8 @@ class PathPlanner:
         time_per_45deg = 0.25  # seconds per 45-degree turn
 
         while self.pos != tuple(target):
-            # --- Check stop sign ---
-            if self.stop_detector.get_status() and not self.stop_latched:
+            # --- Check stop sign ---            
+            if self.stop_detector.stop_detected and not self.stop_latched:
                 print("Stop sign detected! Pausing 2 seconds...")
                 self.stop_latched = True
                 time.sleep(2)  # pause once

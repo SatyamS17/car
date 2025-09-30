@@ -1,73 +1,95 @@
-import threading
+import time
 import cv2
-from detection import Camera, utils  # assuming detection.py defines these
+import mediapipe as mp
+
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-class StopSignDetector:
-    """Detects stop signs in a separate thread."""
-    def __init__(self, model="efficientdet.tflite", width=640, height=480):
+from picamera2 import Picamera2
+from libcamera import Transform
+import utils
+
+
+class StopSign:
+    def __init__(self, model="efficientdet.tflite", width=640, height=480,
+                 num_threads=4, enable_edgetpu=False,
+                 hflip=False, vflip=False, headless=False):
+        """Initialize camera and detector."""
+
         self.model = model
         self.width = width
         self.height = height
-        self.stop_detected = False  # latched detection
-        self.handled = False        # whether the car has already stopped
-        self.running = True
-        self.lock = threading.Lock()
+        self.num_threads = num_threads
+        self.enable_edgetpu = enable_edgetpu
+        self.headless = headless
+        self.stop_detected = False
 
-        # Start thread
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
-
-    def _run(self):
-        cam = Camera(preview_size=(self.width, self.height))
-
-        base_options = python.BaseOptions(model_asset_path=self.model)
-        options = vision.ObjectDetectorOptions(
-            base_options=base_options,
-            score_threshold=0.3,
-            max_results=3
+        # camera setup
+        self.camera = Picamera2()
+        self.transform = Transform(hflip=1 if hflip else 0,
+                                   vflip=1 if vflip else 0)
+        preview_config = self.camera.create_preview_configuration(
+            main={"size": (self.width, self.height)},
+            transform=self.transform
         )
-        detector = vision.ObjectDetector.create_from_options(options)
+        self.camera.configure(preview_config)
+        self.camera.start()
 
-        while self.running:
-            frame = cam.get_frame()
-            if frame is None:
-                continue
+        # setup detector once
+        base_options = python.BaseOptions(model_asset_path=model)
+        options = vision.ObjectDetectorOptions(base_options=base_options,
+                                               score_threshold=0.3,
+                                               max_results=3)
+        self.detector = vision.ObjectDetector.create_from_options(options)
 
-            # Convert to BGR for Mediapipe Image
-            bgr_image = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            
-            import mediapipe as mp
-            input_tensor = mp.Image(
-                image_format=mp.ImageFormat.SRGB,
-                data=bgr_image
-            )
+    def capture_and_detect(self):
+        """Capture one frame and run detection."""
+        image = self.camera.capture_array()
+        if image is None:
+            print("ERROR: Unable to read from PiCamera2.")
+            return None
 
-            result = detector.detect(input_tensor)
+        # Convert to OpenCV BGR
+        bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-            # Check if stop sign detected
-            stop_present = any(
-                detection.categories[0].category_name.lower() == "stop"
-                for detection in result.detections
-            )
+        # Wrap for mediapipe
+        input_tensor = mp.Image(
+            image_format=mp.ImageFormat.SRGB,
+            data=bgr_image
+        )
 
-            with self.lock:
-                if stop_present:
-                    self.stop_detected = True  # latch it
+        # Run detection
+        detection_result = self.detector.detect(input_tensor)
 
-            # Optional visualization
-            vis_image = utils.visualize(bgr_image, result)
-            cv2.imshow("Stop Sign Detection", vis_image)
-            if cv2.waitKey(1) == 27:
-                break
+        # Draw results
+        for detection in detection_result.detections:
+            if detection.categories[0].category_name == "stop sign":
+                self.stop_detected = True
 
-        cv2.destroyAllWindows()
+        if not self.headless:
+            cv2.imshow("object_detector", bgr_image)
+            if cv2.waitKey(1) == 27:  # ESC
+                return "quit"
+        else:
+            cv2.imwrite("last_frame.jpg", bgr_image)
 
-    def get_status(self):
-        with self.lock:
-            return self.stop_detected
+        return detection_result
 
-    def shutdown(self):
-        self.running = False
-        self.thread.join()
+    def main(self):
+        """Run the detection loop once per second until stopped."""
+        try:
+            while True:
+                result = self.capture_and_detect()
+                if result == "quit":
+                    break
+                print("Detection result:", result)
+                time.sleep(1)  # wait 1 second
+        except KeyboardInterrupt:
+            print("Stopped by user")
+        finally:
+            cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    stop_sign = StopSign(headless=True)  # change to False for GUI
+    stop_sign.main()
