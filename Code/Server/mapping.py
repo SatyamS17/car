@@ -2,22 +2,12 @@ import math
 import time
 from time import sleep
 
-<<<<<<< HEAD
-import numpy as np
-
-from servo import Servo
-from ultrasonic import Ultrasonic
-import matplotlib.pyplot as plt
-import time
-from scipy.ndimage import binary_dilation
-=======
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import binary_dilation
 from servo import Servo
 from ultrasonic import Ultrasonic
 
->>>>>>> 49f149becdeec5923538456ae4d69805058efb1f
 
 class AdvancedMap:
     def __init__(
